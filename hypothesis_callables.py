@@ -37,7 +37,7 @@ import re as re
 
 __all__ = [
 	"classes",
-	"functions"
+	"functions",
 	"methods",
 	"classmethods",
 	"staticmethods",
@@ -54,49 +54,66 @@ def _check_callable(arg, name=''):
 								(type=%s)' % (name, arg, type(arg).__name__))
 
 # NOTE: matches any alphanumeric string beginning in an alphabetic char.
-default_binding_regex = re.compile(r'^([_a-zA-Z]+[0-9_]*){1,5}\Z')
+_supported_binding_regex = re.compile(r'^([_a-zA-Z]+[0-9_]*){1,5}\Z')
+"""DOCUMENT ME!!!"""
+#_get_supported_binding_regex = lambda : sbr = _supported_binding_regex; \
+#	return sbr if hasattr(sbr, 'pattern') else re.compile(sbr)
 
-def phony_callable(*args, **kwargs):
+# NOTE:
+#	Don't allow the _supported_binding_regex to be left uncompiled,
+#	if you can't find a way to ensure it's compiled before the strategies get
+#	it, leave this code block in each them.
+#
+#	if not hasattr(binding_regex, 'pattern'):
+#		# this has to be done later anyway inside the binding generator,
+#		# might as well do it now to make things a little faster.
+#		binding_regex = re.compile(binding_regex)
+
+def _phony_callable(*args, **kwargs):
+	"""DOCUMENT ME!!!"""
 	return (args, kwargs)
 
 @hs.composite
-def classes(draw, binding_regex=default_binding_regex,
+def classes(draw,
 		inherits = [],
 		children = {}
 	):
 	"""DOCUMENT ME!!!"""
 
-	if not hasattr(binding_regex, 'pattern'):
-		# this has to be done later anyway inside the binding generator,
-		# might as well do it now to make things a little faster.
-		binding_regex = re.compile(binding_regex)
-
 	# double check types because insurance :P (and hypothesis standards lol)
 	check_type(list, inherits, 'inherits')
 	check_type(dict, children, 'children')
 
-	class_body = [] # holds our child assignments
-	generated = [] # holds our generated child objects
+	#if not hasattr(binding_regex, 'pattern'):
+	#	# this has to be done later anyway inside the binding generator,
+	#	# might as well do it now to make things a little faster.
+	#	binding_regex = re.compile(binding_regex)
+
+	stage = [] # for holding our generated bindings / "cast"
+	stage_map = [] # for those who don't already know their place.
+	tallent = [] # the skills of our cast members! Their values...
+
 	if len(children): # != 0 # redundant
 		# This is some really funky syntax python (*-*) enumerate my soul
 		for index, (key, value) in enumerate(children.items()):
-			# Don't forget to make sure our children's values are strategies
-			# before we waste any resources on generating and ordering them.
-			check_strategy(value, name="value at key '"+key+"' in children")
-			generated.append(draw(children[key]))
-
 			if isinstance(key, int):
-				auto = draw(hs.from_regex(binding_regex))
-				class_body.append(auto+"=generated["+str(index)+"]")
-			elif binding_regex.match(key):
-				class_body.append(key+"=generated["+str(index)+"]")
+				auto = draw(hs.from_regex(_supported_binding_regex))
+				class_body.append("%s=generated[%r]" % (auto, index))
+				stage_map.update()
+			elif _supported_binding_regex.match(key):
+				class_body.append("%s=generated[%r]" % (key, index))
 			else:
 				raise InvalidArgument("child's binding at index: %i, \
 					does not match binding requirements" % (index))
+
+			# Don't forget to make sure our children's values are strategies
+			# before we waste any resources on generating and ordering them.
+			check_strategy(value, name="value at key '%s' in children" % (key))
+			tallent.append(draw(children[key]))
 	else:
 		class_body.append( "pass" )
 
-	name = draw(hs.from_regex(binding_regex))
+	name = draw(hs.from_regex(_supported_binding_regex))
 	body = "".join(["class ",name,"(*inherits):\n\t","\n\t".join( class_body )])
 
 	exec(body, locals())
@@ -105,12 +122,12 @@ def classes(draw, binding_regex=default_binding_regex,
 
 # I really never thought I'd be testing variable function inputs at any point in my life...
 @hs.composite
-def functions(draw, binding_regex=default_binding_regex,
+def functions(draw,
 		min_argc = None, # int
 		max_argc = None, # int
 		manual_argument_bindings = None, # {} dict
 		manual_keyword_bindings = None, # {} dict
-		body = phony_callable,
+		body = _phony_callable,
 		decorators = None, # [] list
 		kwarginit = hs.nothing(),
 	):
@@ -129,23 +146,20 @@ def functions(draw, binding_regex=default_binding_regex,
 	if decorators is not None:
 		check_type(list, decorators, 'decorators')
 		for index, d in enumerate(decorators):
-			if not callable(d):
-				raise InvalidArgument(
-					"iteration %r in 'decorators' expected a callable object \
-					but got: %s (type=%s)" % (index, d, type(arg).__name__)
-				)
+			_check_callable(d, name="iteration %r in 'decorators'" % (index))
 
 	_check_callable(body, name="body")
 
-	if not hasattr(binding_regex, 'pattern'):
-		# this has to be done later anyway inside the binding generator,
-		# might as well do it now to make things a little faster.
-		binding_regex = re.compile(binding_regex)
+	#if not hasattr(binding_regex, 'pattern'):
+	#	# this has to be done later anyway inside the binding generator,
+	#	# might as well do it now to make things a little faster.
+	#	binding_regex = re.compile(binding_regex)
 
 	argb = draw(hs.lists(
 		hs.from_regex(binding_regex),
 		min_size=min_argc,
-		max_size=max_argc
+		max_size=max_argc,
+		unique=True,
 	))
 	argc = len(argb)
 
@@ -156,7 +170,9 @@ def functions(draw, binding_regex=default_binding_regex,
 		kwargb = draw(hs.lists(
 			hs.from_regex(binding_regex),
 			min_size=kwargc,
-			max_size=kwargc
+			max_size=kwargc,
+			unique=True,
+			unique_by= lambda x: x not in argb.keys()
 		))
 	else:
 		kwargc = 0
@@ -176,17 +192,19 @@ def functions(draw, binding_regex=default_binding_regex,
 
 	if manual_argument_bindings is not None:
 		for key, value in manual_argument_bindings.items():
-			if not isinstance(int, key):
-				raise InvalidArgument(
-					"binding dictionarys expect keys to be integers but got: \
-					%s (type=%s)" %(key, type(key).__name__)
-				)
+			check_type(int, key, name="")
+			#if not isinstance(int, key):
+			#	raise InvalidArgument(
+			#		"binding dictionarys expect keys to be integers but got: \
+			#		%s (type=%s)" %(key, type(key).__name__)
+			#	)
 
-			if not isinstance(text_type, value):
-				raise InvalidArgument(
-					"binding dictionarys expect values to be strings but got: \
-					%s (type=%s)" %(value, type(value).__name__)
-				)
+			check_type(text_type, value, name="")
+			#if not isinstance(text_type, value):
+			#	raise InvalidArgument(
+			#		"binding dictionarys expect values to be strings but got: \
+			#		%s (type=%s)" %(value, type(value).__name__)
+			#	)
 
 			if not binding_regex.match(binding):
 				raise InvalidArgument(
@@ -199,17 +217,19 @@ def functions(draw, binding_regex=default_binding_regex,
 
 	if manual_keyword_bindings is not None:
 		for key, value in manual_keyword_bindings.items():
-			if not isinstance(int, key):
-				raise InvalidArgument(
-					"binding dictionarys expect keys to be integers but got: \
-					%s (type=%s)" %(key, type(key).__name__)
-				)
+			check_type(int, key, name="")
+			#if not isinstance(int, key):
+			#	raise InvalidArgument(
+			#		"binding dictionarys expect keys to be integers but got: \
+			#		%s (type=%s)" %(key, type(key).__name__)
+			#	)
 
-			if not isinstance(text_type, value):
-				raise InvalidArgument(
-					"binding dictionarys expect values to be strings but got: \
-					%s (type=%s)" %(value, type(value).__name__)
-				)
+			check_type(text_type, value, name="")
+			#if not isinstance(text_type, value):
+			#	raise InvalidArgument(
+			#		"binding dictionarys expect values to be strings but got: \
+			#		%s (type=%s)" %(value, type(value).__name__)
+			#	)
 
 			if not binding_regex.match(binding):
 				raise InvalidArgument(
@@ -246,12 +266,12 @@ def functions(draw, binding_regex=default_binding_regex,
 	return function
 
 @hs.composite
-def methods(draw, binding_regex=default_binding_regex,
+def methods(draw,
 		min_argc = None, # int
 		max_argc = None, # int
 		manual_argument_bindings = None, # {}
 		manual_keyword_bindings = None, # {}
-		body = phony_callable,
+		body = _phony_callable,
 		decorators = None, # [] itterable
 		kwarginit = hs.nothing(),
 		parent = classes()
@@ -284,12 +304,12 @@ def methods(draw, binding_regex=default_binding_regex,
 	return method_wrapper
 
 @hs.composite
-def classmethods(draw, binding_regex=default_binding_regex,
+def classmethods(draw,
 		min_argc = None, # int
 		max_argc = None, # int
 		manual_argument_bindings = None, # {}
 		manual_keyword_bindings = None, # {}
-		body = phony_callable,
+		body = _phony_callable,
 		decorators = None, # [] itterable
 		kwarginit = hs.nothing(),
 		parent = classes()
@@ -326,12 +346,12 @@ def classmethods(draw, binding_regex=default_binding_regex,
 	return method_wrapper
 
 @hs.composite
-def staticmethods(draw, binding_regex=default_binding_regex,
+def staticmethods(draw,
 		min_argc = None, # int
 		max_argc = None, # int
 		manual_argument_bindings = None, # {}
 		manual_keyword_bindings = None, # {}
-		body = phony_callable,
+		body = _phony_callable,
 		decorators = None, # [] itterable
 		kwarginit = hs.nothing(),
 		parent = classes()
@@ -359,12 +379,12 @@ def staticmethods(draw, binding_regex=default_binding_regex,
 	return method_wrapper
 
 #@hs.composite
-#def callables(draw, binding_regex=default_binding_regex,
+#def callables(draw,
 #		min_argc = None, # int
 #		max_argc = None, # int
 #		manual_argument_bindings = None, # {}
 #		manual_keyword_bindings = None, # {}
-#		body = phony_callable,
+#		body = _phony_callable,
 #		decorators = None, # [] itterable
 #		kwarginit = hs.nothing(),
 #		functions = True,
