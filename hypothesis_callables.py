@@ -89,34 +89,46 @@ def classes(draw,
 	#	# might as well do it now to make things a little faster.
 	#	binding_regex = re.compile(binding_regex)
 
-	stage = [] # for holding our generated bindings / "cast"
-	stage_map = [] # for those who don't already know their place.
+	# for holding our generated bindings / "cast"
+	members = [ None for member in children ]
+	lost_members = [] # for those who don't already know their place.
 	tallent = [] # the skills of our cast members! Their values...
 
 	if len(children): # != 0 # redundant
 		# This is some really funky syntax python (*-*) enumerate my soul
-		for index, (key, value) in enumerate(children.items()):
-			if isinstance(key, int):
-				auto = draw(hs.from_regex(_supported_binding_regex))
-				class_body.append("%s=generated[%r]" % (auto, index))
-				stage_map.update()
-			elif _supported_binding_regex.match(key):
-				class_body.append("%s=generated[%r]" % (key, index))
-			else:
-				raise InvalidArgument("child's binding at index: %i, \
-					does not match binding requirements" % (index))
-
+		for location, (key, value) in enumerate(children.items()):
 			# Don't forget to make sure our children's values are strategies
 			# before we waste any resources on generating and ordering them.
 			check_strategy(value, name="value at key '%s' in children" % (key))
-			tallent.append(draw(children[key]))
+			tallent.append(draw(value))
+
+			if isinstance(key, int): # anon
+				lost_members.append(location)
+			elif _supported_binding_regex.match(key):
+				members[location] = key
+			else:
+				raise InvalidArgument("child's binding at index: %i, \
+					does not match binding requirements" % (index))
 	else:
 		class_body.append( "pass" )
 
-	name = draw(hs.from_regex(_supported_binding_regex))
-	body = "".join(["class ",name,"(*inherits):\n\t","\n\t".join( class_body )])
+	map_count = len(lost_members)
 
-	exec(body, locals())
+	maps = draw(lists( # for those who need directions
+		hs.from_regex(_supported_binding_regex),
+		min_size=map_count + 1,
+		max_size=map_count + 1,
+		unique = True,
+	))
+
+	for long, lat in enumerate(lost_members):
+		members[lat] = maps[long]
+
+	name = maps[1]
+	stage = ("%s=tallent[%r]" % (name,chord) for name, chord in enumerate(maps))
+	act = "".join(["class ",name,"(*inherits):\n\t","\n\t".join( stage )])
+
+	exec(act, locals())
 
 	return locals()[name]
 
