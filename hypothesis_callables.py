@@ -89,32 +89,30 @@ def classes(draw,
 	#	# might as well do it now to make things a little faster.
 	#	binding_regex = re.compile(binding_regex)
 
-	# for holding our generated bindings / "cast"
-	members = [ None for member in children ]
+	static = (None for child in children)
+
+	members = list(static) # for holding our generated bindings / "cast"
 	lost_members = [] # for those who don't already know their place.
-	tallent = [] # the skills of our cast members! Their values...
+	tallent = list(static) # the skills of our cast members! Their values...
 
-	if len(children): # != 0 # redundant
-		# This is some really funky syntax python (*-*) enumerate my soul
-		for location, (key, value) in enumerate(children.items()):
-			# Don't forget to make sure our children's values are strategies
-			# before we waste any resources on generating and ordering them.
-			check_strategy(value, name="value at key '%s' in children" % (key))
-			tallent.append(draw(value))
+	# This is some really funky syntax python (*-*) enumerate my soul
+	for location, (key, value) in enumerate(children.items()):
+		# Don't forget to make sure our children's values are strategies
+		# before we waste any resources on generating and ordering them.
+		check_strategy(value, name="value at key '%s' in children" % (key))
+		tallent.append(draw(value))
 
-			if isinstance(key, int): # anon
-				lost_members.append(location)
-			elif _supported_binding_regex.match(key):
-				members[location] = key
-			else:
-				raise InvalidArgument("child's binding at index: %i, \
-					does not match binding requirements" % (index))
-	else:
-		class_body.append( "pass" )
+		if isinstance(key, int): # anon
+			lost_members.append(location)
+		elif _supported_binding_regex.match(key):
+			members[location] = key
+		else:
+			raise InvalidArgument("child's binding at index: %i, \
+				does not match binding requirements" % (index))
 
 	map_count = len(lost_members)
 
-	maps = draw(lists( # for those who need directions
+	maps = draw(hs.lists( # for those who need directions
 		hs.from_regex(_supported_binding_regex),
 		min_size=map_count + 1,
 		max_size=map_count + 1,
@@ -122,15 +120,17 @@ def classes(draw,
 	))
 
 	for long, lat in enumerate(lost_members):
-		members[lat] = maps[long]
+		members[lat] = maps[:-1][long]
 
-	name = maps[1]
-	stage = ("%s=tallent[%r]" % (name,chord) for name, chord in enumerate(maps))
-	act = "".join(["class ",name,"(*inherits):\n\t","\n\t".join( stage )])
+	act_name = maps[-1]
+	stage = ["pass"] if len(members) < 1 else \
+		["%s=tallent[%r]" % (name, chord) for chord, name in enumerate(members)]
+	act = "".join(["class ",act_name,"(*inherits):\n\t","\n\t".join( stage )])
 
+	print(act)
 	exec(act, locals())
 
-	return locals()[name]
+	return locals()[act_name]
 
 # I really never thought I'd be testing variable function inputs at any point in my life...
 @hs.composite
