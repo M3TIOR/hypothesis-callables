@@ -20,6 +20,7 @@
 #
 
 from __future__ import division, print_function, absolute_import
+if __debug__: import pdb
 
 import hypothesis.strategies as hs
 from hypothesis.errors import InvalidArgument
@@ -53,12 +54,8 @@ def _check_callable(arg, name=''):
 		raise InvalidArgument('Expected a callable object but got %s%r \
 								(type=%s)' % (name, arg, type(arg).__name__))
 
-# NOTE: matches any alphanumeric string beginning in an alphabetic char.
-_supported_binding_regex = re.compile(r'^([_a-zA-Z]+[0-9_]*){1,5}\Z')
-"""DOCUMENT ME!!!"""
-#_get_supported_binding_regex = lambda : sbr = _supported_binding_regex; \
-#	return sbr if hasattr(sbr, 'pattern') else re.compile(sbr)
-
+# NOTE:
+#	Matches any alphanumeric string beginning in an alphabetic char.
 # NOTE:
 #	Don't allow the _supported_binding_regex to be left uncompiled,
 #	if you can't find a way to ensure it's compiled before the strategies get
@@ -68,6 +65,31 @@ _supported_binding_regex = re.compile(r'^([_a-zA-Z]+[0-9_]*){1,5}\Z')
 #		# this has to be done later anyway inside the binding generator,
 #		# might as well do it now to make things a little faster.
 #		binding_regex = re.compile(binding_regex)
+#
+# BUG: 11-14-2018 m3tior
+#	While looking for a problem in the test_manual_child_binding_assignment
+#	I discovered a pottential issue in the exec() function call when assigning
+#	class children preceeded by two underscore characters: for some reason
+#	the class name preceeded with one underscore gets appended to the front
+#	of the child name.
+#
+#	I'm going to look into the latest Python sources for this issue (2.7 & 3.7)
+#	as well as the Python PEPs to see if I can find some specification on it.
+#	Maybe it's not actually a bug? I don't know yet. For now I'm leaving this
+#	as a warning to all users of this library and as an educational example
+#	of what a real bug looks like. This isn't my fault (I think, need PEPs);
+#	hence it's a bug and not user error. :P
+#
+#	In case you're wondering my current Python version is 3.5.2
+#
+#	I've applied a bug fix for the issue; Unfortunately function names
+#	can no longer start with two successive underscore characters...
+#	Ugh :( I know, that sucks for now :P.
+#	Hopefully this is a bug and I can work it out.
+_supported_binding_regex = re.compile(r'^([_a-zA-Z]+[0-9_]*){1,5}\Z')
+"""DOCUMENT ME!!!"""
+#_get_supported_binding_regex = lambda : sbr = _supported_binding_regex; \
+#	return sbr if hasattr(sbr, 'pattern') else re.compile(sbr)
 
 def _phony_callable(*args, **kwargs):
 	"""DOCUMENT ME!!!"""
@@ -79,7 +101,6 @@ def classes(draw,
 		children = {}
 	):
 	"""DOCUMENT ME!!!"""
-
 	# double check types because insurance :P (and hypothesis standards lol)
 	check_type(list, inherits, 'inherits')
 	check_type(dict, children, 'children')
@@ -89,18 +110,19 @@ def classes(draw,
 	#	# might as well do it now to make things a little faster.
 	#	binding_regex = re.compile(binding_regex)
 
-	static = (None for child in children)
+	# preallocated memory pool for optimized access times.
+	static = lambda: [None for child in children]
 
-	members = list(static) # for holding our generated bindings / "cast"
+	members = static() # for holding our generated bindings / "cast"
 	lost_members = [] # for those who don't already know their place.
-	tallent = list(static) # the skills of our cast members! Their values...
+	tallent = static() # the skills of our cast members! Their values...
 
 	# This is some really funky syntax python (*-*) enumerate my soul
 	for location, (key, value) in enumerate(children.items()):
 		# Don't forget to make sure our children's values are strategies
 		# before we waste any resources on generating and ordering them.
 		check_strategy(value, name="value at key '%s' in children" % (key))
-		tallent.append(draw(value))
+		tallent[location] = draw(value)
 
 		if isinstance(key, int): # anon
 			lost_members.append(location)
@@ -127,7 +149,6 @@ def classes(draw,
 		["%s=tallent[%r]" % (name, chord) for chord, name in enumerate(members)]
 	act = "".join(["class ",act_name,"(*inherits):\n\t","\n\t".join( stage )])
 
-	print(act)
 	exec(act, locals())
 
 	return locals()[act_name]
