@@ -110,7 +110,7 @@ class TestClassStrategy(object):
 		children_produced = len(children)
 		children_assigned = 0
 		for key, value in children.items():
-			if isinstance(int, binding):
+			if isinstance(key, int):
 				for attribute in dir(product):
 					if getattr(product, attribute) is value:
 						children_assigned += 1; break;
