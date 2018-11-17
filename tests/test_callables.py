@@ -29,7 +29,7 @@ import os.path as path
 srcdir = path.abspath(path.join(path.dirname(repr(__file__)[1:-1]), "../"))
 sys.path.append(srcdir)
 
-from hypothesis import given
+from hypothesis import given, settings, HealthCheck as hc
 import hypothesis.errors as he
 from hypothesis.internal.compat import PY3, text_type, getfullargspec
 
@@ -74,6 +74,7 @@ class TestClassStrategy(object):
 	"""DOCUMENT ME!!!"""
 
 	@given(data())
+	@settings(suppress_health_check=[hc.data_too_large])
 	def test_automatic_child_binding_assignment(self, data):
 		children = data.draw(primitives_w_bindings(True, False, False))
 		product = data.draw(classes(
@@ -91,6 +92,7 @@ class TestClassStrategy(object):
 		assert children_assigned == children_produced
 
 	@given(data())
+	@settings(suppress_health_check=[hc.data_too_large])
 	def test_manual_child_binding_assignment(self, data):
 		children = data.draw(primitives_w_bindings(False, True, False))
 		product = data.draw(classes(
@@ -101,6 +103,7 @@ class TestClassStrategy(object):
 			assert getattr(product, binding) is value
 
 	@given(data())
+	@settings(suppress_health_check=[hc.data_too_large])
 	def test_combined_child_binding_assignment(self, data):
 		children = data.draw(primitives_w_bindings(True, True, False))
 		product = data.draw(classes(
@@ -121,11 +124,14 @@ class TestClassStrategy(object):
 		assert children_assigned == children_produced
 
 	@given(data())
+	@settings(suppress_health_check=[hc.too_slow, hc.data_too_large])
 	def test_ancestory_inheritance(self, data):
-		unique_children = data.draw(primitives_w_bindings(False, True, False))
-		unique_ancestors = (data.draw(classes(
+		unique_children = data.draw(lists(
+			primitives_w_bindings(False, True, False)
+		))
+		unique_ancestors = [ data.draw(classes(
 			children = {key:just(value) for key, value in mapping.items()}
-		)) for mapping in unique_children)
+		)) for mapping in unique_children ]
 
 		product = data.draw(classes(inherits=unique_ancestors))
 
