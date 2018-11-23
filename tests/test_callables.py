@@ -41,6 +41,11 @@ from hypothesis_callables import _supported_binding_regex
 import pytest # test library
 import pdb # debugger
 
+import re
+
+_unsupported_binding_regex = re.compile(r"^(?!%s).*\Z" \
+	% (_supported_binding_regex.pattern[1:-2]))
+
 @composite
 def primitives(draw):
 	"""DOCUMENT ME!!!"""
@@ -56,18 +61,20 @@ def primitives(draw):
 		lists()
 	))
 
-def primitives_w_bindings(automatic, manual, fail):
+def primitives_w_bindings(automatic, manual, fail, \
+	min_size=None, max_size=50):
 	"""DOCUMENT ME!!!"""
 	bindings = []
 
+	if fail: bindings.append( from_regex(_unsupported_binding_regex) )
 	if manual: bindings.append( from_regex(_supported_binding_regex) )
 	if automatic: bindings.append( integers() )
-	if fail: bindings.append( characters() )
 
 	return dictionaries(
 		one_of(*bindings), # bindings
 		primitives(), # child values
-		max_size=10
+		max_size=max_size,
+		min_size=min_size
 	)
 
 class TestClassStrategy(object):
@@ -143,25 +150,21 @@ class TestClassStrategy(object):
 				for key, value in product_elements.items()
 		)
 
-
-
 	@given(data())
 	def test_bad_child_keys(self, data):
 		"""DOCUMENT ME!!!"""
-		pass
 		with pytest.raises(he.InvalidArgument):
-			children = data.draw(primitives_w_bindings(True, True, True))
-			product = data.draw(classes(children = children))
+			good_children = data.draw(primitives_w_bindings( \
+				True, True, False))
 
-	@given(data())
-	def test_bad_ancestor(self, data):
-		pass
-		with pytest.raises(he.InvalidArgument):
-			children = data.draw()
+			bad_children = data.draw(primitives_w_bindings( \
+				False, False, True, min_size=1 ))
 
-			generated_object = data.draw(classes(
-				children = children
-			))
+			product = data.draw(classes( \
+				children = good_children.update(bad_children) ))
+
+	#def test_bad_ancestor(self, data):
+	#	NOTE: Can't really have a bad ancestor because of how inheritance works
 
 	@given(data())
 	def test_bad_binding_regex(self):

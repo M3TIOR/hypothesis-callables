@@ -86,7 +86,7 @@ def _check_callable(arg, name=''):
 #	can no longer start with two successive underscore characters...
 #	Ugh :( I know, that sucks for now :P.
 #	Hopefully this is a bug and I can work it out.
-_supported_binding_regex = re.compile(r'^(_?[a-zA-Z]+[0-9_]*|(_[0-9]+[a-zA-Z_]*)){1,5}\Z')
+_supported_binding_regex = re.compile(r'^(_?[a-zA-Z]+[0-9_]+|(_[0-9]+[a-zA-Z_]+)){1,5}\Z')
 """DOCUMENT ME!!!"""
 #_get_supported_binding_regex = lambda : sbr = _supported_binding_regex; \
 #	return sbr if hasattr(sbr, 'pattern') else re.compile(sbr)
