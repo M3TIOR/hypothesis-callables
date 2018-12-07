@@ -166,9 +166,8 @@ class TestClassStrategy(object):
 	#def test_bad_ancestor(self, data):
 	#	NOTE: Can't really have a bad ancestor because of how inheritance works
 
-	@given(data())
-	def test_bad_binding_regex(self):
-		pass
+	#def test_bad_binding_regex(self):
+	#	NOTE: Can't have bad binding regex
 
 	@given(data())
 	def test_good_instance(self):

@@ -20,12 +20,12 @@
 #
 
 from __future__ import division, print_function, absolute_import
-if __debug__: import pdb
 
 import hypothesis.strategies as hs
 from hypothesis.errors import InvalidArgument
 from hypothesis.searchstrategy import check_strategy
 from hypothesis.internal.coverage import check_function
+from hypothesis.searchstrategy.types import _global_strategy_lookup
 from hypothesis.internal.validation import (
 	check_type, check_valid_size, check_valid_interval, check_valid_integer
 )
@@ -68,7 +68,7 @@ def _check_callable(arg, name=''):
 #
 # BUG: 11-14-2018 m3tior
 #	While looking for a problem in the test_manual_child_binding_assignment
-#	I discovered a pottential issue in the exec() function call when assigning
+#	I discovered a pottential issue in the exec() function call. When assigning
 #	class children preceeded by two underscore characters: for some reason
 #	the class name preceeded with one underscore gets appended to the front
 #	of the child name.
@@ -95,56 +95,66 @@ def _phony_callable(*args, **kwargs):
 	"""DOCUMENT ME!!!"""
 	return (args, kwargs)
 
+def strategies():
+	"""DOCUMENT ME!!!"""
+	return one_of(_global_strategy_lookup.items())
+
+# TODO:
+#	*Possibly add automatic generation of children on unassigned children*
+#	*Possibly add automatic generation of ancestors on unnasigned inherits*
+#	*Add ability to have multiple random children be bound to the same object*
 @hs.composite
-def classes(draw,
-		inherits = [],
-		children = {}
-	):
+def classes(draw, inherits=None, children=None):
 	"""DOCUMENT ME!!!"""
 	# double check types because insurance :P (and hypothesis standards lol)
 	check_type(list, inherits, 'inherits')
 	check_type(dict, children, 'children')
 
-	#if not hasattr(binding_regex, 'pattern'):
-	#	# this has to be done later anyway inside the binding generator,
-	#	# might as well do it now to make things a little faster.
-	#	binding_regex = re.compile(binding_regex)
+	if children is None:
 
-	# preallocated memory pool for optimized access times.
-	static = lambda: [None for child in children]
+	else:
+		# preallocated memory pool for optimized access times.
+		static = lambda: [None for child in children] if children is not None
 
-	members = static() # for holding our generated bindings / "cast"
-	lost_members = [] # for those who don't already know their place.
-	tallent = static() # the skills of our cast members! Their values...
+		members = static() # for holding our generated bindings / "cast"
+		lost_members = [] # for those who don't already know their place.
+		tallent = static() # the skills of our cast members! Their values...
 
-	# This is some really funky syntax python (*-*) enumerate my soul
-	for location, (key, value) in enumerate(children.items()):
-		# Don't forget to make sure our children's values are strategies
-		# before we waste any resources on generating and ordering them.
-		check_strategy(value, name="value at key '%s' in children" % (key))
-		tallent[location] = draw(value)
+		# This is some really funky syntax python (*-*) enumerate my soul
+		for location, (key, value) in enumerate(children.items()):
+			# Don't forget to make sure our children's values are strategies
+			# before we waste any resources on generating and ordering them.
+			check_strategy(value, name="value at key '%s' in children" % (key))
 
-		if isinstance(key, int): # anon
-			lost_members.append(location)
-		elif _supported_binding_regex.match(key):
-			members[location] = key
-		else:
-			raise InvalidArgument("child's binding at index: %i, \
-				does not match binding requirements" % (index))
+			if isinstance(key, int): # anon
+				lost_members.append(location)
+			elif _supported_binding_regex.match(key):
+				members[location] = key
+			else:
+				raise InvalidArgument("child's binding at index: %i, \
+					does not match binding requirements" % (index))
 
-	map_count = len(lost_members)
+			# Wait to generate our children after sorting micro optimization
+			tallent[location] = draw(value)
 
-	maps = draw(hs.lists( # for those who need directions
-		hs.from_regex(_supported_binding_regex),
-		min_size=map_count + 1,
-		max_size=map_count + 1,
-		unique = True,
-	))
+		map_count = len(lost_members)
+		maps = draw(hs.lists( # for those who need directions
+			hs.from_regex(_supported_binding_regex),
+			min_size=map_count,
+			max_size=map_count,
+			unique = True,
+		))
 
-	for long, lat in enumerate(lost_members):
-		members[lat] = maps[:-1][long]
+		for long, lat in enumerate(lost_members):
+			members[lat] = maps[long]
 
-	act_name = maps[-1]
+	#NOTE:
+	#	While I found it easy to tell myself that I could optimize things a
+	#	little by drawing the act_name with the generated variable names;
+	#	because the generated variable names are unique, this would mean
+	#	the act_name has no chance in having a child with the same name,
+	#	which would unfortunately be bad for falsification. (;-;)
+	act_name = draw(hs.from_regex(_supported_binding_regex))
 	stage = ["pass"] if len(members) < 1 else \
 		["%s=tallent[%r]" % (name, chord) for chord, name in enumerate(members)]
 	act = "".join(["class ",act_name,"(*inherits):\n\t","\n\t".join( stage )])
