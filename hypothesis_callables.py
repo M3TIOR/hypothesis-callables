@@ -3,21 +3,11 @@
 # hypothesis_callables: A callable generator extension for the hypothesis lib.
 # Copyright (C) 2018 Ruby Allison Rose
 #
-# This library is free software; you can redistribute it and/or
-# modify it under the terms of the GNU Lesser General Public
-# License as published by the Free Software Foundation; either
-# version 2.1 of the License, or (at your option) any later version.
+# This Source Code Form is subject to the terms of the Mozilla Public License,
+# v. 2.0. If a copy of the MPL was not distributed with this file, You can
+# obtain one at http://mozilla.org/MPL/2.0/.
 #
-# This library is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-# Lesser General Public License for more details.
-#
-# You should have received a copy of the GNU Lesser General Public
-# License along with this library; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301
-# USA
-#
+# END HEADER
 
 from __future__ import division, print_function, absolute_import
 
@@ -59,7 +49,7 @@ def _check_callable(arg, name=''):
 # NOTE:
 #	Don't allow the _supported_binding_regex to be left uncompiled,
 #	if you can't find a way to ensure it's compiled before the strategies get
-#	it, leave this code block in each them.
+#	it, leave this code block in each of them.
 #
 #	if not hasattr(binding_regex, 'pattern'):
 #		# this has to be done later anyway inside the binding generator,
@@ -86,7 +76,13 @@ def _check_callable(arg, name=''):
 #	can no longer start with two successive underscore characters...
 #	Ugh :( I know, that sucks for now :P.
 #	Hopefully this is a bug and I can work it out.
-_supported_binding_regex = re.compile(r'^(_?[a-zA-Z]+[0-9_]+|(_[0-9]+[a-zA-Z_]+)){1,5}\Z')
+#
+# BUG: 12-08-2018 m3tior UPDATE:
+#	I couldn't find anything in the PEPs, Still have yet to look into the
+#	sources and docs. I'll probs check the docs first just in case I missed
+#	something in there.
+#
+_supported_binding_regex = re.compile('^(_?([a-zA-Z]_*)+[0-9_]*|(_([0-9]_*)+[a-zA-Z_]*))\Z')
 """DOCUMENT ME!!!"""
 #_get_supported_binding_regex = lambda : sbr = _supported_binding_regex; \
 #	return sbr if hasattr(sbr, 'pattern') else re.compile(sbr)
@@ -95,9 +91,12 @@ def _phony_callable(*args, **kwargs):
 	"""DOCUMENT ME!!!"""
 	return (args, kwargs)
 
-def strategies():
+@hs.composite
+def _strategies(min_difficulty=None, max_difficulty=None):
 	"""DOCUMENT ME!!!"""
-	return one_of(_global_strategy_lookup.items())
+	return draw(one_of(
+		_global_strategy_lookup.items()[min_difficulty : max_difficulty]
+	))
 
 # TODO:
 #	*Possibly add automatic generation of children on unassigned children*
@@ -111,7 +110,13 @@ def classes(draw, inherits=None, children=None):
 	check_type(dict, children, 'children')
 
 	if children is None:
+		children = draw(hs.dictionaries(
+			hs.from_regex(_supported_binding_regex),
+			_strategies()
+		))
 
+		members = children.keys()
+		tallent = children.values()
 	else:
 		# preallocated memory pool for optimized access times.
 		static = lambda: [None for child in children] if children is not None
