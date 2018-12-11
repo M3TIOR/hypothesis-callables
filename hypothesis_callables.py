@@ -9,7 +9,27 @@
 #
 # END HEADER
 
+"""MODULE DOCSTRING TODO"""
+
+
 from __future__ import division, print_function, absolute_import
+
+
+__author__ = "Ruby Allison Rose"
+__version__ = "0.0.1"
+__all__ = [
+	"classes",
+	"functions",
+	"methods",
+	"classmethods",
+	"staticmethods",
+	#"callables",
+	#"parameters"
+]
+
+
+from collections import Iterable
+import re as re
 
 import hypothesis.strategies as hs
 from hypothesis.errors import InvalidArgument
@@ -22,27 +42,6 @@ from hypothesis.internal.validation import (
 from hypothesis.internal.compat import (
 	PY3, text_type, ceil, floor, getfullargspec
 )
-
-from collections import Iterable
-import re as re
-
-__all__ = [
-	"classes",
-	"functions",
-	"methods",
-	"classmethods",
-	"staticmethods",
-	#"callables",
-	#"parameters"
-]
-
-@check_function
-def _check_callable(arg, name=''):
-	if name:
-		name += '='
-	if not callable(arg):
-		raise InvalidArgument('Expected a callable object but got %s%r \
-								(type=%s)' % (name, arg, type(arg).__name__))
 
 # NOTE:
 #	Matches any alphanumeric string beginning in an alphabetic char.
@@ -88,8 +87,16 @@ _supported_binding_regex = re.compile('^(_?([a-zA-Z]_*)+[0-9_]*|(_([0-9]_*)+[a-z
 #	return sbr if hasattr(sbr, 'pattern') else re.compile(sbr)
 
 def _phony_callable(*args, **kwargs):
-	"""DOCUMENT ME!!!"""
-	return (args, kwargs)
+"""DOCUMENT ME!!!"""
+return (args, kwargs)
+
+@check_function
+def _check_callable(arg, name=''):
+	if name:
+		name += '='
+	if not callable(arg):
+		raise InvalidArgument('Expected a callable object but got %s%r \
+								(type=%s)' % (name, arg, type(arg).__name__))
 
 @hs.composite
 def _strategies(min_difficulty=None, max_difficulty=None):
@@ -115,69 +122,74 @@ def classes(draw, inherits=None, children=None):
 			_strategies()
 		))
 
-		members = children.keys()
-		tallent = children.values()
+		bindings = children.keys()
+		values = children.values()
 	else:
 		# preallocated memory pool for optimized access times.
-		static = lambda: [None for child in children] if children is not None
+		def static(): return [None for child in children]
 
-		members = static() # for holding our generated bindings / "cast"
-		lost_members = [] # for those who don't already know their place.
-		tallent = static() # the skills of our cast members! Their values...
+		bindings = static()
+		values = static()
+		unknown = []
 
 		# This is some really funky syntax python (*-*) enumerate my soul
-		for location, (key, value) in enumerate(children.items()):
+		for pos, (key, value) in enumerate(children.items()):
 			# Don't forget to make sure our children's values are strategies
 			# before we waste any resources on generating and ordering them.
 			check_strategy(value, name="value at key '%s' in children" % (key))
 
-			if isinstance(key, int): # anon
-				lost_members.append(location)
+			if isinstance(key, int):
+				unknown.append(pos)
 			elif _supported_binding_regex.match(key):
-				members[location] = key
+				bindings[pos] = key
 			else:
 				raise InvalidArgument("child's binding at index: %i, \
 					does not match binding requirements" % (index))
 
-			# Wait to generate our children after sorting micro optimization
-			tallent[location] = draw(value)
+			# Generate our children after sorting; micro optimization
+			values[pos] = draw(value)
 
-		map_count = len(lost_members)
-		maps = draw(hs.lists( # for those who need directions
+		unknown_bindings = len(lost_members)
+		generated_bindings = draw(hs.lists(
 			hs.from_regex(_supported_binding_regex),
-			min_size=map_count,
-			max_size=map_count,
-			unique = True,
+			min_size=unknown_bindings,
+			max_size=unknown_bindings,
+			unique=True,
 		))
 
-		for long, lat in enumerate(lost_members):
-			members[lat] = maps[long]
+		for long, lat in enumerate(unknown_bindings):
+			bindings[lat] = generated_bindings[long]
 
-	#NOTE:
+	# NOTE:
 	#	While I found it easy to tell myself that I could optimize things a
 	#	little by drawing the act_name with the generated variable names;
 	#	because the generated variable names are unique, this would mean
 	#	the act_name has no chance in having a child with the same name,
 	#	which would unfortunately be bad for falsification. (;-;)
-	act_name = draw(hs.from_regex(_supported_binding_regex))
-	stage = ["pass"] if len(members) < 1 else \
-		["%s=tallent[%r]" % (name, chord) for chord, name in enumerate(members)]
-	act = "".join(["class ",act_name,"(*inherits):\n\t","\n\t".join( stage )])
+	class_name = draw(hs.from_regex(_supported_binding_regex))
+ 	code = "".join([
+		"class ", class_name, "(*inherits):\n\t", "\n\t".join(
+			["pass"] if len(members) < 1 else [
+				"%s = tallent[%r]" % (name, pos) \
+					for pos, name in enumerate(members)
+			]
+		)
+	])
 
-	exec(act, locals())
+	exec(code, locals())
 
-	return locals()[act_name]
+	return locals()[class_name]
 
 # I really never thought I'd be testing variable function inputs at any point in my life...
 @hs.composite
 def functions(draw,
-		min_argc = None, # int
-		max_argc = None, # int
-		manual_argument_bindings = None, # {} dict
-		manual_keyword_bindings = None, # {} dict
-		body = _phony_callable,
-		decorators = None, # [] list
-		kwarginit = hs.nothing(),
+		min_argc=None, # int
+		max_argc=None, # int
+		manual_argument_bindings=None, # {} dict
+		manual_keyword_bindings=None, # {} dict
+		body=_phony_callable,
+		decorators=None, # [] list
+		kwarginit=hs.nothing(),
 	):
 	"""DOCUMENT ME!!!"""
 
@@ -220,7 +232,7 @@ def functions(draw,
 			min_size=kwargc,
 			max_size=kwargc,
 			unique=True,
-			unique_by= lambda x: x not in argb.keys()
+			unique_by=lambda x: x not in argb.keys()
 		))
 	else:
 		kwargc = 0
@@ -241,24 +253,13 @@ def functions(draw,
 	if manual_argument_bindings is not None:
 		for key, value in manual_argument_bindings.items():
 			check_type(int, key, name="")
-			#if not isinstance(int, key):
-			#	raise InvalidArgument(
-			#		"binding dictionarys expect keys to be integers but got: \
-			#		%s (type=%s)" %(key, type(key).__name__)
-			#	)
-
 			check_type(text_type, value, name="")
-			#if not isinstance(text_type, value):
-			#	raise InvalidArgument(
-			#		"binding dictionarys expect values to be strings but got: \
-			#		%s (type=%s)" %(value, type(value).__name__)
-			#	)
 
 			if not binding_regex.match(binding):
 				raise InvalidArgument(
 					"binding dictionary value at '%s' does not match binding \
 					regex. '%s' not found in (regex=%s)"
-					%(key, value, binding_regex)
+					% (key, value, binding_regex)
 				)
 
 			if key <= argb: argb[key] = value
@@ -266,18 +267,7 @@ def functions(draw,
 	if manual_keyword_bindings is not None:
 		for key, value in manual_keyword_bindings.items():
 			check_type(int, key, name="")
-			#if not isinstance(int, key):
-			#	raise InvalidArgument(
-			#		"binding dictionarys expect keys to be integers but got: \
-			#		%s (type=%s)" %(key, type(key).__name__)
-			#	)
-
 			check_type(text_type, value, name="")
-			#if not isinstance(text_type, value):
-			#	raise InvalidArgument(
-			#		"binding dictionarys expect values to be strings but got: \
-			#		%s (type=%s)" %(value, type(value).__name__)
-			#	)
 
 			if not binding_regex.match(binding):
 				raise InvalidArgument(
@@ -288,25 +278,20 @@ def functions(draw,
 
 			if key <= kwargb: kwargb[key] = value
 
-	name = draw(hs.from_regex(binding_regex))
+	function_name = draw(hs.from_regex(binding_regex))
+	arg_defs = ",".join(argb),
+	kwarg_defs = ("".join([kwarg, "=kwargv[", str(index), "],"])) \
+		for index, kwarg in enumerate(kwargb)
+	kwarg_pass = ("".join(kwarg, "=", kwarg, ",") for kwarg in kwargb),
 
-	exec ("".join([
-		# Define function using generated name
-		'def ',name,'(',
-			",".join(argb),
-			",".join([ kwarg + "=kwargv["+str(index)+"]," \
-				# zip up the keyword arguments and assign them their init values.
-				for index, kwarg in enumerate(kwargb)]),
-		'): ',
+	code = "".join([
+		'def ', function_name, '(', arg_defs, *list(kwarg_defs), '): ',
+			'return body(', arg_defs, *list(kwarg_pass), ')'
+	])
 
-		# Execute function body and return elements
-		'return body(',
-			",".join(argb),
-			",".join([ kwarg+"="+kwarg for kwarg in kwargb]),
-		')'
-	]), locals())
+	exec(code, locals())
 
-	function = locals()[name]
+	function = locals()[function_name]
 
 	if decorators is not None:
 		for d in reverse(decorators): function = d(function)
@@ -315,14 +300,14 @@ def functions(draw,
 
 @hs.composite
 def methods(draw,
-		min_argc = None, # int
-		max_argc = None, # int
-		manual_argument_bindings = None, # {}
-		manual_keyword_bindings = None, # {}
-		body = _phony_callable,
-		decorators = None, # [] itterable
-		kwarginit = hs.nothing(),
-		parent = classes()
+		min_argc=None, # int
+		max_argc=None, # int
+		manual_argument_bindings=None, # {}
+		manual_keyword_bindings=None, # {}
+		body=_phony_callable,
+		decorators=None, # [] itterable
+		kwarginit=hs.nothing(),
+		parent=classes()
 	):
 	"""DOCUMENT ME!!!"""
 	check_strategy(parent, name="parent")
@@ -338,29 +323,30 @@ def methods(draw,
 
 	container = draw(parent)
 	method_body = draw(functions(
-		binding_regex = binding_regex,
-		min_argc = min_argc + 1, max_argc = max_argc + 1,
+		binding_regex=binding_regex,
+		min_argc=(min_argc + 1), max_argc=(max_argc+1),
 		manual_argument_bindings = arguments,
-		manual_keyword_bindings = manual_keyword_bindings, body = body,
+		manual_keyword_bindings = manual_keyword_bindings, body=body,
 		decorators = decorators, kwarginit = kwarginit
 	))
 	setattr(container, method_body.__name__, method_body)
 
+	call = "".join(["container.", method_body.__name__, "(*args, **kwargs)"])
 	def method_wrapper(*args, **kwargs):
-		exec("container."+ method_body.__name__ +"(*args, **kwargs)", locals())
+		exec(call , locals())
 
 	return method_wrapper
 
 @hs.composite
 def classmethods(draw,
-		min_argc = None, # int
-		max_argc = None, # int
-		manual_argument_bindings = None, # {}
-		manual_keyword_bindings = None, # {}
-		body = _phony_callable,
-		decorators = None, # [] itterable
-		kwarginit = hs.nothing(),
-		parent = classes()
+		parent=classes(),
+		min_argc=None, # int
+		max_argc=None, # int
+		manual_argument_bindings=None, # {}
+		manual_keyword_bindings=None, # {}
+		kwarginit=hs.nothing(),
+		decorators=None, # [] itterable
+		body=_phony_callable,
 	):
 	"""DOCUMENT ME!!!"""
 	check_strategy(parent, name="parent")
@@ -376,55 +362,63 @@ def classmethods(draw,
 	arguments.update(manual_argument_bindings) # because this is override
 
 	# classmethod designation must be first in the series function properly
-	decorators = [classmethod, ] + decorators
+	decorators = [classmethod,] + decorators
 
 	container = draw(parent)
 	method_body = draw(functions(
-		binding_regex = binding_regex,
-		min_argc = min_argc + 1, max_argc = max_argc + 1,
-		manual_argument_bindings = arguments, # enforce defaults
-		manual_keyword_bindings = manual_keyword_bindings, body = body,
-		decorators = decorators, kwarginit = kwarginit
+		binding_regex=binding_regex,
+		min_argc=(min_argc+1),
+		max_argc=(max_argc+1),
+		manual_argument_bindings=arguments, # enforce defaults
+		manual_keyword_bindings=manual_keyword_bindings,
+		kwarginit=kwarginit,
+		decorators=decorators,
+		body=body,
 	))
 	setattr(container, method_body.__name__, method_body)
 
+	call = "".join(["container.", method_body.__name__, "(*args, **kwargs)"])
 	def method_wrapper(*args, **kwargs):
-		exec("container."+ method_body.__name__ +"(*args, **kwargs)", locals())
+		exec(call , locals())
 
 	return method_wrapper
 
 @hs.composite
-def staticmethods(draw,
-		min_argc = None, # int
-		max_argc = None, # int
-		manual_argument_bindings = None, # {}
-		manual_keyword_bindings = None, # {}
-		body = _phony_callable,
-		decorators = None, # [] itterable
-		kwarginit = hs.nothing(),
-		parent = classes()
+def staticfunctions(draw,
+		parent=classes(),
+		min_argc=None, # int
+		max_argc=None, # int
+		manual_argument_bindings=None, # {}
+		manual_keyword_bindings=None, # {}
+		kwarginit=hs.nothing(),
+		decorators=None, # [] itterable
+		body=_phony_callable,
 	):
 	"""DOCUMENT ME!!!"""
 	check_strategy(parent, name="parent")
 	check_type(list, decorators, name="decorators")
 
 	# primary decorator must be first in the series function properly
-	decorators = [staticmethod, ] + decorators
+	decorators = [staticmethod,] + decorators
 
 	container = draw(parent)
 	method_body = draw(functions(
-		binding_regex = binding_regex,
-		min_argc = min_argc, max_argc = max_argc,
-		manual_argument_bindings = arguments,
-		manual_keyword_bindings = manual_keyword_bindings, body = body,
-		decorators = decorators, kwarginit = kwarginit
+		binding_regex=binding_regex,
+		min_argc=min_argc,
+		max_argc=max_argc,
+		manual_argument_bindings=arguments,
+		manual_keyword_bindings=manual_keyword_bindings,
+		kwarginit=kwarginit,
+		decorators=decorators,
+		body=body,
 	))
 	setattr(container, method_body.__name__, method_body)
 
-	def method_wrapper(*args, **kwargs):
-		exec("container."+ method_body.__name__ +"(*args, **kwargs)", locals())
+	call = "".join(["container.", method_body.__name__, "(*args, **kwargs)"])
+	def function_wrapper(*args, **kwargs):
+		exec(call , locals())
 
-	return method_wrapper
+	return function_wrapper
 
 #@hs.composite
 #def callables(draw,
