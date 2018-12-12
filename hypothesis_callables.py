@@ -28,8 +28,9 @@ __all__ = [
 ]
 
 
-from collections import Iterable
-import re as re
+from collections import Iterable, OrderedDict
+import sre_constants
+import re
 
 import hypothesis.strategies as hs
 from hypothesis.errors import InvalidArgument
@@ -81,14 +82,20 @@ from hypothesis.internal.compat import (
 #	sources and docs. I'll probs check the docs first just in case I missed
 #	something in there.
 #
-_supported_binding_regex = re.compile('^(_?([a-zA-Z]_*)+[0-9_]*|(_([0-9]_*)+[a-zA-Z_]*))\Z')
-"""DOCUMENT ME!!!"""
+_supported_binding_regex = re.compile(
+	'^(_?([a-zA-Z]_*)+[0-9_]*|(_([0-9]_*)+[a-zA-Z_]*))\Z'
+)
+"""str: Regex that matches all known supported variable bindings.
+
+This is used internally for generation of all inexplicit hypothesis_callables
+variable bindings. It's also the default for generated function and class names.
+"""
 #_get_supported_binding_regex = lambda : sbr = _supported_binding_regex; \
 #	return sbr if hasattr(sbr, 'pattern') else re.compile(sbr)
 
 def _phony_callable(*args, **kwargs):
-"""DOCUMENT ME!!!"""
-return (args, kwargs)
+	"""DOCUMENT ME!!!"""
+	return (args, kwargs)
 
 @check_function
 def _check_callable(arg, name=''):
@@ -97,6 +104,63 @@ def _check_callable(arg, name=''):
 	if not callable(arg):
 		raise InvalidArgument('Expected a callable object but got %s%r \
 								(type=%s)' % (name, arg, type(arg).__name__))
+
+def _validate_bindings(draw, elements, name=""):
+	"""DOCUMENT ME!!!"""
+
+	# Use OrderedDict over regular to enforce strictness of binding position
+	# because they tranlate directly to a linear memory map.
+	check_type(OrderedDict, elements, name)
+
+	# preallocated memory pool for optimized access times.
+	def static(): return tuple(None for elm in elements)
+
+	bindings = static()
+	values = static()
+	unknown = []
+
+	# This is some really funky syntax python (*-*) enumerate my soul
+	for pos, (key, value) in enumerate(elements.items()):
+		# Don't forget to make sure our children's values are strategies
+		# before we waste any resources on generating and ordering them.
+		check_strategy(value, name="value at key '%s' in %s" % (key, name))
+
+		if isinstance(key, int):
+			unknown.append(pos)
+		elif isinstance(key, text_type):
+			if not _supported_binding_regex.match(key):
+				try:
+					key = draw(hs.from_regex(key))
+				except(sre_constants.error):
+					raise InvalidArgument(
+						"Could not satisfy requirements of binding \
+						'%s' at index '%i' in %s, invalid regex."
+						% (key, index, name)
+					)
+
+			bindings[pos] = key
+		else:
+			raise InvalidArgument(
+				"Expected binding at index '%d' of '%s' be int or %s, \
+				but got '%r' (type=%s)"
+				% (pos, name, text_type, key, type(key).__name__)
+			)
+
+		# Generate our children after sorting; micro optimization
+		values[pos] = draw(value)
+
+	unknown_bindings = len(lost_members)
+	generated_bindings = draw(hs.lists(
+		hs.from_regex(_supported_binding_regex),
+		min_size=unknown_bindings,
+		max_size=unknown_bindings,
+		unique=True,
+	))
+
+	for long, lat in enumerate(unknown_bindings):
+		bindings[lat] = generated_bindings[long]
+
+	return (bindings, values)
 
 @hs.composite
 def _strategies(min_difficulty=None, max_difficulty=None):
@@ -110,11 +174,11 @@ def _strategies(min_difficulty=None, max_difficulty=None):
 #	*Possibly add automatic generation of ancestors on unnasigned inherits*
 #	*Add ability to have multiple random children be bound to the same object*
 @hs.composite
-def classes(draw, inherits=None, children=None):
+def classes(draw, name=None, inherits=None, children=None):
 	"""DOCUMENT ME!!!"""
 	# double check types because insurance :P (and hypothesis standards lol)
-	check_type(list, inherits, 'inherits')
-	check_type(dict, children, 'children')
+	check_type(text_type, name, "name")
+	check_type(list, inherits, "inherits")
 
 	if children is None:
 		children = draw(hs.dictionaries(
@@ -125,48 +189,11 @@ def classes(draw, inherits=None, children=None):
 		bindings = children.keys()
 		values = children.values()
 	else:
-		# preallocated memory pool for optimized access times.
-		def static(): return [None for child in children]
+		bindings, values = _validate_bindings(draw, children, name="children")
 
-		bindings = static()
-		values = static()
-		unknown = []
-
-		# This is some really funky syntax python (*-*) enumerate my soul
-		for pos, (key, value) in enumerate(children.items()):
-			# Don't forget to make sure our children's values are strategies
-			# before we waste any resources on generating and ordering them.
-			check_strategy(value, name="value at key '%s' in children" % (key))
-
-			if isinstance(key, int):
-				unknown.append(pos)
-			elif _supported_binding_regex.match(key):
-				bindings[pos] = key
-			else:
-				raise InvalidArgument("child's binding at index: %i, \
-					does not match binding requirements" % (index))
-
-			# Generate our children after sorting; micro optimization
-			values[pos] = draw(value)
-
-		unknown_bindings = len(lost_members)
-		generated_bindings = draw(hs.lists(
-			hs.from_regex(_supported_binding_regex),
-			min_size=unknown_bindings,
-			max_size=unknown_bindings,
-			unique=True,
-		))
-
-		for long, lat in enumerate(unknown_bindings):
-			bindings[lat] = generated_bindings[long]
-
-	# NOTE:
-	#	While I found it easy to tell myself that I could optimize things a
-	#	little by drawing the act_name with the generated variable names;
-	#	because the generated variable names are unique, this would mean
-	#	the act_name has no chance in having a child with the same name,
-	#	which would unfortunately be bad for falsification. (;-;)
-	class_name = draw(hs.from_regex(_supported_binding_regex))
+	class_name = draw(hs.from_regex(
+		name if name is not None else _supported_binding_regex
+	))
  	code = "".join([
 		"class ", class_name, "(*inherits):\n\t", "\n\t".join(
 			["pass"] if len(members) < 1 else [
@@ -183,6 +210,7 @@ def classes(draw, inherits=None, children=None):
 # I really never thought I'd be testing variable function inputs at any point in my life...
 @hs.composite
 def functions(draw,
+		name=None
 		min_argc=None, # int
 		max_argc=None, # int
 		manual_argument_bindings=None, # {} dict
@@ -194,9 +222,9 @@ def functions(draw,
 	"""DOCUMENT ME!!!"""
 
 	# Replicates check_valid_sizes logic but with correct variable names
-	check_valid_size(min_argc, 'min_argc')
-	check_valid_size(max_argc, 'max_argc')
-	check_valid_interval(min_argc, max_argc, 'min_argc', 'max_argc')
+	check_valid_size(min_argc, "min_argc")
+	check_valid_size(max_argc, "max_argc")
+	check_valid_interval(min_argc, max_argc, "min_argc", "max_argc")
 
 	min_argc = None if min_argc is None else ceil(min_argc)
 	max_argc = None if max_argc is None else floor(max_argc)
@@ -204,7 +232,7 @@ def functions(draw,
 	check_strategy(kwarginit, name="kwarginit")
 
 	if decorators is not None:
-		check_type(list, decorators, 'decorators')
+		check_type(list, decorators, "decorators")
 		for index, d in enumerate(decorators):
 			_check_callable(d, name="iteration %r in 'decorators'" % (index))
 
